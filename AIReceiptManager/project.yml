@@ -1,0 +1,20 @@
+name: AIReceiptManager
+options:
+  bundleIdPrefix: com.vicliu
+configs:
+  Debug: debug
+  Release: release
+targets:
+  AIReceiptManager:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - AIReceiptManager
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.vicliu.AIReceiptManager
+      INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+      INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+      INFOPLIST_KEY_UILaunchScreen_Generation: YES
+      INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+    dependencies: []
