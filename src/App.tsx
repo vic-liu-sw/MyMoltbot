@@ -132,13 +132,13 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-stone-100 text-stone-900">
-        <header className="border-b border-stone-200 bg-white px-4 py-4 sm:px-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">AIReceiptManager</p>
-          <h1 className="text-xl font-bold">隱私優先 AI 帳單管家</h1>
+      <div className="min-h-screen bg-[#f2f2f7] text-slate-900">
+        <header className="sticky top-0 z-10 border-b border-slate-200/80 bg-white/80 px-4 pb-3 pt-4 backdrop-blur-xl sm:px-6">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">AIReceiptManager</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">隱私優先 AI 帳單管家</h1>
         </header>
 
-        <main className="mx-auto w-full max-w-5xl px-4 py-6 pb-24 sm:px-6">
+        <main className="mx-auto w-full max-w-4xl px-4 py-5 pb-24 sm:px-6">
           <Routes>
             <Route path="/" element={<HomePage count={totals.count} total={totals.total} />} />
             <Route
@@ -163,12 +163,12 @@ function App() {
           </Routes>
         </main>
 
-        <nav className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white/95 backdrop-blur">
-          <div className="mx-auto grid max-w-5xl grid-cols-4 gap-1 px-3 py-2 text-xs sm:text-sm">
-            <Tab to="/" label="首頁" />
-            <Tab to="/scan" label="掃描" />
-            <Tab to="/bills" label="帳單" />
-            <Tab to="/settings" label="設定" />
+        <nav className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/90 backdrop-blur-xl">
+          <div className="mx-auto grid max-w-4xl grid-cols-4 gap-1 px-3 py-2 text-xs">
+            <Tab to="/" label="首頁" icon="🏠" />
+            <Tab to="/scan" label="掃描" icon="📷" />
+            <Tab to="/bills" label="帳單" icon="🧾" />
+            <Tab to="/settings" label="設定" icon="⚙️" />
           </div>
         </nav>
       </div>
@@ -176,15 +176,16 @@ function App() {
   )
 }
 
-function Tab({ to, label }: { to: string; label: string }) {
+function Tab({ to, label, icon }: { to: string; label: string; icon: string }) {
   return (
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `rounded-lg px-3 py-2 text-center font-medium ${isActive ? 'bg-emerald-600 text-white' : 'text-stone-600 hover:bg-stone-100'}`
+        `rounded-xl px-2 py-1.5 text-center ${isActive ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-100'}`
       }
     >
-      {label}
+      <div className="text-base leading-none">{icon}</div>
+      <div className="mt-1 text-[11px] font-medium">{label}</div>
     </NavLink>
   )
 }
@@ -192,7 +193,7 @@ function Tab({ to, label }: { to: string; label: string }) {
 function HomePage({ count, total }: { count: number; total: number }) {
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+      <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
         <h2 className="text-lg font-semibold">原型亮點</h2>
         <ul className="mt-3 space-y-2 text-sm text-stone-700">
           <li>• OCR（本地執行）＋ 規則解析（總計/日期）</li>
@@ -202,11 +203,11 @@ function HomePage({ count, total }: { count: number; total: number }) {
         </ul>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
           <p className="text-sm text-stone-500">帳單筆數</p>
           <p className="mt-1 text-3xl font-bold">{count}</p>
         </div>
-        <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
           <p className="text-sm text-stone-500">總支出</p>
           <p className="mt-1 text-3xl font-bold">NT$ {total.toLocaleString()}</p>
         </div>
@@ -226,7 +227,7 @@ type ScanPageProps = {
 
 function ScanPage({ ocrText, setOcrText, onUpload, onSave, loading, error }: ScanPageProps) {
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+    <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
       <h2 className="text-lg font-semibold">掃描帳單</h2>
       <p className="mt-1 text-sm text-stone-600">上傳影像或貼 OCR 文字，然後儲存成帳單。</p>
 
@@ -263,7 +264,7 @@ function ScanPage({ ocrText, setOcrText, onUpload, onSave, loading, error }: Sca
 
 function BillsPage({ bills }: { bills: Bill[] }) {
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+    <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
       <h2 className="text-lg font-semibold">帳單列表</h2>
       <div className="mt-4 overflow-x-auto">
         <table className="min-w-full text-left text-sm">
@@ -299,7 +300,7 @@ function BillsPage({ bills }: { bills: Bill[] }) {
 
 function SettingsPage({ onClear }: { onClear: () => void }) {
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+    <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
       <h2 className="text-lg font-semibold">設定</h2>
       <p className="mt-2 text-sm text-stone-600">清除本機資料、查看隱私原則與 iOS 對齊說明。</p>
       <button onClick={onClear} className="mt-4 rounded-lg border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50">
