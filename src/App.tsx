@@ -1,221 +1,246 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useMemo, useState } from 'react'
+import type { ChangeEvent } from 'react'
+import { createWorker } from 'tesseract.js'
 
-type Todo = {
+type Bill = {
   id: string
-  title: string
-  completed: boolean
-  createdAt: number
+  merchantName: string
+  amount: number
+  subtotal?: number
+  date?: string
+  category: string
+  rawText: string
+  createdAt: string
 }
 
-type Filter = 'all' | 'active' | 'completed'
+const STORAGE_KEY = 'ai-receipt-manager-bills'
 
-const STORAGE_KEY = 'my-moltbot-todos'
+const categoryRules: Array<{ keyword: string; category: string }> = [
+  { keyword: '7-eleven', category: '飲食' },
+  { keyword: '全家', category: '飲食' },
+  { keyword: 'uber', category: '交通' },
+  { keyword: '台灣大車隊', category: '交通' },
+  { keyword: '屈臣氏', category: '生活' },
+  { keyword: 'mcdonald', category: '飲食' },
+]
+
+const amountRegex = /(total|總計|小計)\s*[:：]?\s*(?:nt\$|n\.?t\.?\$|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/gim
+const dateRegex = /(\d{4}[\/-]\d{1,2}[\/-]\d{1,2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/g
+
+function parseReceipt(rawText: string) {
+  let amount: number | undefined
+  let subtotal: number | undefined
+
+  for (const match of rawText.matchAll(amountRegex)) {
+    const key = (match[1] ?? '').toLowerCase()
+    const value = Number((match[2] ?? '').replaceAll(',', ''))
+    if (Number.isNaN(value)) continue
+
+    if (key.includes('小計')) subtotal = value
+    else amount = value
+  }
+
+  const firstDate = rawText.match(dateRegex)?.[0]
+  const merchantName =
+    rawText
+      .split('\n')
+      .map((v) => v.trim())
+      .find((v) => v.length > 0) ?? 'Unknown Merchant'
+
+  return { amount, subtotal, date: firstDate, merchantName }
+}
+
+function classifyMerchant(merchantName: string, rawText: string) {
+  const source = `${merchantName} ${rawText}`.toLowerCase()
+  const hit = categoryRules.find((r) => source.includes(r.keyword.toLowerCase()))
+  return hit?.category ?? '未分類'
+}
+
+function loadBills(): Bill[] {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (!raw) return []
+  try {
+    return JSON.parse(raw) as Bill[]
+  } catch {
+    return []
+  }
+}
 
 function App() {
-  const [todos, setTodos] = useState<Todo[]>([])
-  const [input, setInput] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingText, setEditingText] = useState('')
-  const [filter, setFilter] = useState<Filter>('all')
+  const [ocrText, setOcrText] = useState('')
+  const [isOcrLoading, setIsOcrLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [bills, setBills] = useState<Bill[]>(() => loadBills())
 
-  useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return
+  const totals = useMemo(() => {
+    const total = bills.reduce((sum, b) => sum + b.amount, 0)
+    return { count: bills.length, total }
+  }, [bills])
+
+  const handleImageOCR = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setError(null)
+    setIsOcrLoading(true)
 
     try {
-      const parsed = JSON.parse(raw) as Todo[]
-      setTodos(parsed)
-    } catch {
-      localStorage.removeItem(STORAGE_KEY)
-    }
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(todos))
-  }, [todos])
-
-  const activeCount = useMemo(() => todos.filter((t) => !t.completed).length, [todos])
-
-  const filteredTodos = useMemo(() => {
-    if (filter === 'active') return todos.filter((t) => !t.completed)
-    if (filter === 'completed') return todos.filter((t) => t.completed)
-    return todos
-  }, [filter, todos])
-
-  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const title = input.trim()
-    if (!title) return
-
-    setTodos((prev) => [
-      {
-        id: crypto.randomUUID(),
-        title,
-        completed: false,
-        createdAt: Date.now(),
-      },
-      ...prev,
-    ])
-    setInput('')
-  }
-
-  const toggleTodo = (id: string) => {
-    setTodos((prev) =>
-      prev.map((todo) =>
-        todo.id === id ? { ...todo, completed: !todo.completed } : todo,
-      ),
-    )
-  }
-
-  const deleteTodo = (id: string) => {
-    setTodos((prev) => prev.filter((todo) => todo.id !== id))
-    if (editingId === id) {
-      setEditingId(null)
-      setEditingText('')
+      const worker = await createWorker(['chi_tra', 'eng'])
+      const ret = await worker.recognize(file)
+      setOcrText(ret.data.text)
+      await worker.terminate()
+    } catch (e) {
+      setError(`OCR 失敗：${e instanceof Error ? e.message : '未知錯誤'}`)
+    } finally {
+      setIsOcrLoading(false)
     }
   }
 
-  const startEdit = (todo: Todo) => {
-    setEditingId(todo.id)
-    setEditingText(todo.title)
+  const handleSaveBill = () => {
+    setError(null)
+
+    if (!ocrText.trim()) {
+      setError('請先貼上 OCR 文字或上傳帳單圖片。')
+      return
+    }
+
+    const parsed = parseReceipt(ocrText)
+    if (!parsed.amount) {
+      setError('找不到「總計/Total/小計」金額，請檢查文字內容。')
+      return
+    }
+
+    const bill: Bill = {
+      id: crypto.randomUUID(),
+      merchantName: parsed.merchantName,
+      amount: parsed.amount,
+      subtotal: parsed.subtotal,
+      date: parsed.date,
+      category: classifyMerchant(parsed.merchantName, ocrText),
+      rawText: ocrText,
+      createdAt: new Date().toISOString(),
+    }
+
+    const next = [bill, ...bills]
+    setBills(next)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
   }
 
-  const saveEdit = (id: string) => {
-    const next = editingText.trim()
-    if (!next) return
-
-    setTodos((prev) => prev.map((todo) => (todo.id === id ? { ...todo, title: next } : todo)))
-    setEditingId(null)
-    setEditingText('')
-  }
-
-  const clearCompleted = () => {
-    setTodos((prev) => prev.filter((todo) => !todo.completed))
+  const clearBills = () => {
+    setBills([])
+    localStorage.removeItem(STORAGE_KEY)
   }
 
   return (
-    <main className="min-h-screen px-4 py-10">
-      <section className="mx-auto w-full max-w-2xl rounded-2xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
-        <header className="mb-6">
-          <p className="text-sm font-medium uppercase tracking-wide text-emerald-700">MyMoltbot</p>
-          <h1 className="mt-1 text-3xl font-bold text-stone-900">To-Do List</h1>
-          <p className="mt-2 text-sm text-stone-500">簡潔、高效、可持久保存的任務清單。</p>
+    <main className="min-h-screen bg-stone-100 px-4 py-8 text-stone-900 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <header className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Privacy-First Prototype</p>
+          <h1 className="mt-2 text-3xl font-bold">AI 隱私帳單管家</h1>
+          <p className="mt-2 text-sm text-stone-600">
+            展示 AI + 系統整合：Vision OCR 思路、Regex/日期解析、Core ML 分類 wrapper 概念、離線儲存與 Siri Intent 流程。
+          </p>
         </header>
 
-        <form onSubmit={onSubmit} className="mb-5 flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="新增任務，例如：整理本週開發計劃"
-            className="h-11 flex-1 rounded-xl border border-stone-300 bg-white px-4 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-          />
-          <button
-            type="submit"
-            className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.98]"
-          >
-            新增
-          </button>
-        </form>
+        <section className="grid gap-6 lg:grid-cols-2">
+          <article className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold">Phase 1 + 2：OCR 與解析</h2>
+            <p className="mt-1 text-sm text-stone-600">瀏覽器端 OCR（Tesseract.js，本地執行）→ Regex 抽金額 + 日期偵測。</p>
 
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-          <div className="text-stone-500">剩餘 {activeCount} 項待完成</div>
-          <div className="inline-flex rounded-lg border border-stone-200 bg-stone-50 p-1">
-            {(['all', 'active', 'completed'] as const).map((item) => (
+            <label className="mt-4 block text-sm font-medium">上傳帳單圖片（可選）</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageOCR}
+              className="mt-2 block w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+            />
+
+            {isOcrLoading && <p className="mt-3 text-sm text-amber-700">OCR 辨識中，請稍候…</p>}
+
+            <label className="mt-4 block text-sm font-medium">OCR 文字（可手動貼上）</label>
+            <textarea
+              value={ocrText}
+              onChange={(e) => setOcrText(e.target.value)}
+              rows={10}
+              placeholder={'7-ELEVEN\n總計: 180\n日期: 2026/02/12'}
+              className="mt-2 w-full rounded-lg border border-stone-300 p-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+            />
+
+            <div className="mt-4 flex flex-wrap gap-2">
               <button
-                key={item}
-                onClick={() => setFilter(item)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize transition ${
-                  filter === item ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'
-                }`}
+                onClick={handleSaveBill}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
               >
-                {item === 'all' ? '全部' : item === 'active' ? '進行中' : '已完成'}
+                解析並儲存
               </button>
-            ))}
+              <button
+                onClick={() => setOcrText('')}
+                className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium hover:bg-stone-50"
+              >
+                清空文字
+              </button>
+            </div>
+
+            {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+          </article>
+
+          <article className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold">Phase 3 + 4 + 5：分類 / 儲存 / Siri</h2>
+            <ul className="mt-2 space-y-2 text-sm text-stone-700">
+              <li>• 分類核心：以關鍵字規則模擬 Core ML 文字分類結果（可替換為 ExpenseClassifier.mlmodel）</li>
+              <li>• 資料存儲：目前用 LocalStorage 模擬 SwiftData 離線資料庫</li>
+              <li>• 同步概念：正式 iOS 版可啟用 CloudKit 讓多裝置同步</li>
+              <li>• Siri：正式 iOS 版以 AppIntent + AppShortcutsProvider 支援「記下這張帳單」</li>
+            </ul>
+
+            <div className="mt-5 rounded-xl border border-stone-200 bg-stone-50 p-4">
+              <p className="text-sm font-medium">原型摘要</p>
+              <p className="mt-2 text-sm text-stone-600">帳單筆數：{totals.count}</p>
+              <p className="text-sm text-stone-600">總支出：NT$ {totals.total.toLocaleString()}</p>
+              <button
+                onClick={clearBills}
+                className="mt-3 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-stone-100"
+              >
+                清空本地資料
+              </button>
+            </div>
+          </article>
+        </section>
+
+        <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">已儲存帳單（離線）</h2>
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-stone-200 text-stone-500">
+                  <th className="px-3 py-2 font-medium">店家</th>
+                  <th className="px-3 py-2 font-medium">分類</th>
+                  <th className="px-3 py-2 font-medium">金額</th>
+                  <th className="px-3 py-2 font-medium">日期</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bills.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-6 text-stone-500" colSpan={4}>
+                      尚無資料，先上傳一張帳單或貼 OCR 文字試試。
+                    </td>
+                  </tr>
+                ) : (
+                  bills.map((bill) => (
+                    <tr key={bill.id} className="border-b border-stone-100">
+                      <td className="px-3 py-2">{bill.merchantName}</td>
+                      <td className="px-3 py-2">{bill.category}</td>
+                      <td className="px-3 py-2">NT$ {bill.amount.toLocaleString()}</td>
+                      <td className="px-3 py-2">{bill.date ?? '-'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        </div>
-
-        <ul className="space-y-2">
-          {filteredTodos.length === 0 && (
-            <li className="rounded-xl border border-dashed border-stone-300 bg-stone-50 px-4 py-8 text-center text-sm text-stone-500">
-              目前沒有符合條件的任務。
-            </li>
-          )}
-
-          {filteredTodos.map((todo) => (
-            <li key={todo.id} className="rounded-xl border border-stone-200 bg-white px-3 py-2">
-              <div className="flex items-center gap-3">
-                <input
-                  checked={todo.completed}
-                  onChange={() => toggleTodo(todo.id)}
-                  type="checkbox"
-                  className="h-5 w-5 accent-emerald-600"
-                />
-
-                <div className="min-w-0 flex-1">
-                  {editingId === todo.id ? (
-                    <input
-                      value={editingText}
-                      onChange={(e) => setEditingText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveEdit(todo.id)
-                        if (e.key === 'Escape') {
-                          setEditingId(null)
-                          setEditingText('')
-                        }
-                      }}
-                      autoFocus
-                      className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                    />
-                  ) : (
-                    <p
-                      className={`truncate text-sm ${
-                        todo.completed ? 'text-stone-400 line-through' : 'text-stone-800'
-                      }`}
-                    >
-                      {todo.title}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-1">
-                  {editingId === todo.id ? (
-                    <button
-                      onClick={() => saveEdit(todo.id)}
-                      className="rounded-md px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-                    >
-                      保存
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => startEdit(todo)}
-                      className="rounded-md px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100"
-                    >
-                      編輯
-                    </button>
-                  )}
-                  <button
-                    onClick={() => deleteTodo(todo.id)}
-                    className="rounded-md px-2.5 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
-                  >
-                    刪除
-                  </button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-
-        <footer className="mt-5 flex items-center justify-between text-xs text-stone-500">
-          <span>資料已自動儲存在本機瀏覽器。</span>
-          <button
-            onClick={clearCompleted}
-            className="rounded-md px-2.5 py-1.5 font-medium text-stone-600 hover:bg-stone-100"
-          >
-            清除已完成
-          </button>
-        </footer>
-      </section>
+        </section>
+      </div>
     </main>
   )
 }
